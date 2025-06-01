@@ -41,6 +41,67 @@ inline btVector3 convert(const Vector3& v) { return btVector3(v.x, v.y, v.z); }
 inline Quaternion convert(const btQuaternion& q) { return Quaternion(q.w(), q.x(), q.y(), q.z()); }
 inline Vector3 convert(const btVector3& v) { return Vector3(v.x(), v.y(), v.z()); }
 
+inline void unscaleBtBasis(btTransform &scaledBasis)
+{
+    btMatrix3x3 &basis(scaledBasis.getBasis());
+    btVector3 column0 = basis.getColumn(0);
+    btVector3 column1 = basis.getColumn(1);
+    btVector3 column2 = basis.getColumn(2);
+
+	// Check for zero scaling.
+    if (column0.fuzzyZero()) {
+        if (column1.fuzzyZero()) {
+            if (column2.fuzzyZero()) {
+                // All dimensions are fuzzy zero. Create a default basis.
+                column0 = btVector3(1, 0, 0);
+                column1 = btVector3(0, 1, 0);
+                column2 = btVector3(0, 0, 1);
+            } else { // Column 2 scale not fuzzy zero.
+                     // Create two vectors orthogonal to row 2.
+                     // Ensure that a default basis is created if row 2 = <0, 0, 1>
+                     column1 = btVector3(0, column2[2], -column2[1]);
+                     column0 = column1.cross(column2);
+            }
+        } else { // Column 1 scale not fuzzy zero.
+            if (column2.fuzzyZero()) {
+                // Create two vectors othogonal to column 1.
+                // Ensure that a default basis is created if column 1 = <0, 1, 0>
+                column0 = btVector3(column1[1], -column1[0], 0);
+                column2 = column0.cross(column1);
+            } else { // Column 1 and column 2 scales not fuzzy zero.
+                // Create column 0 orthogonal to column 1 and column 2.
+                column0 = column1.cross(column2);
+            }
+        }
+    } else { // Column 0 scale not fuzzy zero.
+        if (column1.fuzzyZero()) {
+            if (column2.fuzzyZero()) {
+            // Create two vectors orthogonal to column 0.
+            // Ensure that a default basis is created if column 0 = <1, 0, 0>
+                column2 = btVector3(-column0[2], 0, column0[0]);
+                column1 = column2.cross(column0);
+            } else { // Column 0 and column 2 scales not fuzzy zero.
+                     // Create column 1 orthogonal to column 0 and column 2.
+                column1 = column2.cross(column0);
+            }
+        } else { // Column 0 and column 1 scales not fuzzy zero.
+            if (column2.fuzzyZero()) {
+                // Create column 2 orthogonal to column 0 and column 1.
+                column2 = column0.cross(column1);
+            }
+        }
+    }
+
+    // Normalize
+    column0.normalize();
+    column1.normalize();
+    column2.normalize();
+
+    basis.setValue(column0[0], column1[0], column2[0],
+        column0[1], column1[1], column2[1],
+        column0[2], column1[2], column2[2]);
+}
+
 /** A MotionState is Bullet's way of informing you about updates to an object.
  * Pass this MotionState to a btRigidBody to have your SceneNode updated automaticaly.
  */
@@ -143,6 +204,12 @@ public:
     void attachRigidBody(btRigidBody *rigidBody, Entity *ent, CollisionListener* listener = nullptr,
                               int group = 1, int mask = -1);
     btDynamicsWorld* getBtWorld() const { return static_cast<btDynamicsWorld*>(mBtWorld); }
+#if 0
+    struct MotionResult {};
+    bool test_body_motion(btRigidBody *body, const btTransform &from, const btVector3 motion,
+                          bool infinite_inertia, MotionResult *result, bool exclude_raycast_shapes,
+			  const std::set<btCollisionObject *> &exclude);
+#endif
 };
 
 class _OgreBulletExport DebugDrawer : public btIDebugDraw
