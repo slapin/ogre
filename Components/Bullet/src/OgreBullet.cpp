@@ -216,6 +216,8 @@ DynamicsWorld::DynamicsWorld(const Vector3& gravity)
         new btDiscreteDynamicsWorld(mDispatcher.get(), mBroadphase.get(), mSolver.get(), mCollisionConfig.get());
     btworld->setGravity(convert(gravity));
     btworld->setInternalTickCallback(onTick);
+    mGhostPairCallback = new btGhostPairCallback();
+    btworld->getPairCache()->setInternalGhostPairCallback(mGhostPairCallback);
     mBtWorld = btworld;
 }
 
@@ -334,10 +336,12 @@ void CollisionWorld::attachCollisionObject(btCollisionObject* collisionObject, E
 {
     auto node = ent->getParentSceneNode();
     OgreAssert(node, "entity must be attached");
+    OgreAssert(collisionObject->getWorldArrayIndex() == -1, "Object should not be attached to world");
     if (collisionObject->getWorldArrayIndex() == -1)
         mBtWorld->addCollisionObject(collisionObject, group, mask);
 
     // transfer ownership to node
+    collisionObject->setUserPointer(new EntityCollisionListener{ent, nullptr});
     auto objWrapper = std::make_shared<CollisionObject>(collisionObject, mBtWorld);
     node->getUserObjectBindings().setUserAny("BtCollisionObject", objWrapper);
 }
@@ -366,7 +370,12 @@ void CollisionWorld::rayTest(const Ray& ray, RayResultCallback* callback, float 
     mBtWorld->rayTest(from, to, wrapper);
 }
 
-CollisionWorld::~CollisionWorld() { delete mBtWorld; }
+CollisionWorld::~CollisionWorld()
+{
+    delete mBtWorld;
+    if (mGhostPairCallback)
+        delete mGhostPairCallback;
+}
 
 /*
  * =============================================================================================
@@ -785,446 +794,7 @@ void DebugDrawer::drawLine(const btVector3& from, const btVector3& to, const btV
     mLines.position(convert(to));
     mLines.colour(col);
 }
-#if 0
-void KinematicMotion::setupCollisionShapes(btRigidBody* body)
-{
-    std::list<std::pair<btCompoundShape*, btTransform>> shape_list;
-    btCollisionShape* root_shape = body->getCollisionShape();
-    btTransform root_xform;
-    root_xform.setIdentity();
-    if (root_shape->isCompound())
-    {
-        btCompoundShape* cshape = static_cast<btCompoundShape*>(root_shape);
-        shape_list.push_back({cshape, root_xform});
-    }
-    else
-    {
-        mCollisionShapes.push_back(root_shape);
-        mCollisionTransforms.push_back(root_xform);
-    }
-    while (!shape_list.empty())
-    {
-        int i;
-        std::pair<btCompoundShape*, btTransform> s = shape_list.front();
-        shape_list.pop_front();
-        for (i = 0; i < s.first->getNumChildShapes(); i++)
-        {
-            btCollisionShape* shape = s.first->getChildShape(i);
-            btTransform xform = s.second * s.first->getChildTransform(i);
-            if (shape->isConvex())
-            {
-                mCollisionShapes.push_back(shape);
-                mCollisionTransforms.push_back(xform);
-            }
-            else if (shape->isCompound())
-            {
-                btCompoundShape* cshape = static_cast<btCompoundShape*>(shape);
-                shape_list.push_back({cshape, xform});
-            }
-        }
-    }
-}
-bool KinematicMotion::RFP_convex_convex_test(const btConvexShape* p_shapeA, const btConvexShape* p_shapeB,
-                                             btCollisionObject* p_objectB, int p_shapeId_A, int p_shapeId_B,
-                                             const btTransform& p_transformA, const btTransform& p_transformB,
-                                             btScalar p_recover_movement_scale, btVector3& r_delta_recover_movement,
-                                             RecoverResult* r_recover_result)
-{
-    // Initialize GJK input
-    btGjkPairDetector::ClosestPointInput gjk_input;
-    gjk_input.m_transformA = p_transformA;
-    // Avoid repeat penetrations
-    gjk_input.m_transformA.getOrigin() += r_delta_recover_movement;
-    gjk_input.m_transformB = p_transformB;
 
-    // Perform GJK test
-    btPointCollector result;
-    btGjkPairDetector gjk_pair_detector(p_shapeA, p_shapeB, gjk_simplex_solver, gjk_epa_pen_solver);
-    gjk_pair_detector.getClosestPoints(gjk_input, result, nullptr);
-    if (0 > result.m_distance)
-    {
-        // Has penetration
-        r_delta_recover_movement += result.m_normalOnBInWorld * (result.m_distance * -1 * p_recover_movement_scale);
-
-        if (r_recover_result)
-        {
-            if (result.m_distance < r_recover_result->mPenetrationDistance)
-            {
-                r_recover_result->mHasPenetration = true;
-                r_recover_result->mLocalShapeMostRecovered = p_shapeId_A;
-                r_recover_result->mOtherCollisionObject = p_objectB;
-                r_recover_result->mOtherCompoundShapeIndex = p_shapeId_B;
-                r_recover_result->mPenetrationDistance = result.m_distance;
-                r_recover_result->mPointWorld = result.m_pointInWorld;
-                r_recover_result->mNormal = result.m_normalOnBInWorld;
-            }
-        }
-        return true;
-    }
-    return false;
-}
-
-bool KinematicMotion::RFP_convex_world_test(btDynamicsWorld* dynamicsWorld, const btConvexShape* p_shapeA,
-                                            const btCollisionShape* p_shapeB, btCollisionObject* p_objectA,
-                                            btCollisionObject* p_objectB, int p_shapeId_A, int p_shapeId_B,
-                                            const btTransform& p_transformA, const btTransform& p_transformB,
-                                            btScalar p_recover_movement_scale, btVector3& r_delta_recover_movement,
-                                            RecoverResult* r_recover_result)
-{
-    /// Contact test
-
-    btTransform tA(p_transformA);
-    // Avoid repeat penetrations
-    tA.getOrigin() += r_delta_recover_movement;
-
-    btCollisionObjectWrapper obA(nullptr, p_shapeA, p_objectA, tA, -1, p_shapeId_A);
-    btCollisionObjectWrapper obB(nullptr, p_shapeB, p_objectB, p_transformB, -1, p_shapeId_B);
-
-    btCollisionAlgorithm* algorithm = dispatcher->findAlgorithm(&obA, &obB, nullptr, BT_CONTACT_POINT_ALGORITHMS);
-    if (algorithm)
-    {
-        GodotDeepPenetrationContactResultCallback contactPointResult(&obA, &obB);
-        // discrete collision detection query
-        algorithm->processCollision(&obA, &obB, dynamicsWorld->getDispatchInfo(), &contactPointResult);
-
-        algorithm->~btCollisionAlgorithm();
-        dispatcher->freeCollisionAlgorithm(algorithm);
-
-        if (contactPointResult.hasHit())
-        {
-            r_delta_recover_movement += contactPointResult.m_pointNormalWorld *
-                                        (contactPointResult.m_penetration_distance * -1 * p_recover_movement_scale);
-            if (r_recover_result)
-            {
-                if (contactPointResult.m_penetration_distance < r_recover_result->mPenetrationDistance)
-                {
-                    r_recover_result->mHasPenetration = true;
-                    r_recover_result->mLocalShapeMostRecovered = p_shapeId_A;
-                    r_recover_result->mOtherCollisionObject = p_objectB;
-                    r_recover_result->mOtherCompoundShapeIndex = p_shapeId_B;
-                    r_recover_result->mPenetrationDistance = contactPointResult.m_penetration_distance;
-                    r_recover_result->mPointWorld = contactPointResult.m_pointWorld;
-                    r_recover_result->mNormal = contactPointResult.m_pointNormalWorld;
-                }
-            }
-            return true;
-        }
-    }
-    return false;
-}
-
-bool KinematicMotion::recoverFromPenetration(btCollisionWorld* collisionWorld, const btTransform& bodyPosition,
-                                             RecoverResult& rresult)
-{
-    // Here we must refresh the overlapping paircache as the penetrating movement itself or the
-    // previous recovery iteration might have used setWorldTransform and pushed us into an object
-    // that is not in the previous cache contents from the last timestep, as will happen if we
-    // are pushed into a new AABB overlap. Unhandled this means the next convex sweep gets stuck.
-    //
-    // Do this by calling the broadphase's setAabb with the moved AABB, this will update the broadphase
-    // paircache and the ghostobject's internal paircache at the same time.    /BW
-
-    btVector3 minAabb, maxAabb;
-    /*
-    mCollisionShape->getAabb(mGhostObject->getWorldTransform(), minAabb, maxAabb);
-    collisionWorld->getBroadphase()->setAabb(m_ghostObject->getBroadphaseHandle(), minAabb, maxAabb,
-                                             collisionWorld->getDispatcher());
-    */
-    bool shapes_found = false;
-
-    for (int kinIndex = 0; kinIndex < (int)mCollisionShapes.size(); kinIndex++)
-    {
-
-        btTransform shapeTransform = bodyPosition * mCollisionTransforms[kinIndex];
-        shapeTransform.getOrigin() += mDeltaRecoverMovement;
-
-        btVector3 shapeAabbMin, shapeAabbMax;
-        mCollisionShapes[kinIndex]->getAabb(shapeTransform, shapeAabbMin, shapeAabbMax);
-
-        if (!shapes_found)
-        {
-            minAabb = shapeAabbMin;
-            maxAabb = shapeAabbMax;
-            shapes_found = true;
-        }
-        else
-        {
-            minAabb.setX((minAabb.x() < shapeAabbMin.x()) ? minAabb.x() : shapeAabbMin.x());
-            minAabb.setY((minAabb.y() < shapeAabbMin.y()) ? minAabb.y() : shapeAabbMin.y());
-            minAabb.setZ((minAabb.z() < shapeAabbMin.z()) ? minAabb.z() : shapeAabbMin.z());
-
-            maxAabb.setX((maxAabb.x() > shapeAabbMax.x()) ? maxAabb.x() : shapeAabbMax.x());
-            maxAabb.setY((maxAabb.y() > shapeAabbMax.y()) ? maxAabb.y() : shapeAabbMax.y());
-            maxAabb.setZ((maxAabb.z() > shapeAabbMax.z()) ? maxAabb.z() : shapeAabbMax.z());
-        }
-    }
-
-    // If there are no shapes then there is no penetration either
-    if (!shapes_found)
-    {
-        return false;
-    }
-    // Perform broadphase test
-    struct RecoverBroadPhaseCallback : public btBroadphaseAabbCallback
-    {
-    private:
-        btDbvtVolume mBounds;
-
-        const btCollisionObject* mSelfCollisionObject;
-        /*
-        uint32_t mCollisionLayer;
-        uint32_t mCollisionMask;
-        */
-
-        struct CompoundLeafCallback : btDbvt::ICollide
-        {
-        private:
-            RecoverBroadPhaseCallback* mParentCallback;
-            btCollisionObject* mCollisionObject;
-
-        public:
-            CompoundLeafCallback(RecoverBroadPhaseCallback* parentCallback, btCollisionObject* collisionObject)
-                : mParentCallback(parentCallback), mCollisionObject(collisionObject)
-            {
-            }
-
-            void Process(const btDbvtNode* leaf)
-            {
-                BroadphaseResult result = {mCollisionObject, leaf->dataAsInt};
-                mParentCallback->mResults.push_back(result);
-            }
-        };
-
-    public:
-        struct BroadphaseResult
-        {
-            btCollisionObject* mCollisionObject;
-            int mCompoundChildIndex;
-        };
-
-        std::vector<BroadphaseResult> mResults;
-
-    public:
-        RecoverBroadPhaseCallback(const btCollisionObject* selfCollisionObject, uint32_t collisionLayer,
-                                  uint32_t collisionMask, btVector3 minAabb, btVector3 maxAabb)
-            : mSelfCollisionObject(
-                  selfCollisionObject) /*, mCollisionLayer(collisionLayer), mCollisionMask(collisionMask) */
-        {
-            mBounds = btDbvtVolume::FromMM(minAabb, maxAabb);
-        }
-
-        virtual ~RecoverBroadPhaseCallback() {}
-
-        virtual bool process(const btBroadphaseProxy* proxy)
-        {
-            btCollisionObject* co = static_cast<btCollisionObject*>(proxy->m_clientObject);
-            if (co->getInternalType() <= btCollisionObject::CO_RIGID_BODY)
-            {
-                if (mSelfCollisionObject != proxy->m_clientObject /* && GodotFilterCallback::test_collision_filters(
-                        collision_layer, collision_mask, proxy->m_collisionFilterGroup, proxy->m_collisionFilterMask) */)
-                {
-                    if (co->getCollisionShape()->isCompound())
-                    {
-                        const btCompoundShape* cs = static_cast<btCompoundShape*>(co->getCollisionShape());
-
-                        if (cs->getNumChildShapes() > 1)
-                        {
-                            const btDbvt* tree = cs->getDynamicAabbTree();
-                            if (!tree)
-                                return true;
-
-                            // Transform bounds into compound shape local space
-                            const btTransform otherInCompoundSpace = co->getWorldTransform().inverse();
-                            const btMatrix3x3 absB = otherInCompoundSpace.getBasis().absolute();
-                            const btVector3 localCenter = otherInCompoundSpace(mBounds.Center());
-                            const btVector3 localExtent = mBounds.Extents().dot3(absB[0], absB[1], absB[2]);
-                            const btVector3 localMinAabb = localCenter - localExtent;
-                            const btVector3 localMaxAabb = localCenter + localExtent;
-                            const btDbvtVolume localBounds = btDbvtVolume::FromMM(localMinAabb, localMaxAabb);
-
-                            // Test collision against compound child shapes using its AABB tree
-                            CompoundLeafCallback compoundLeafCallback(this, co);
-                            tree->collideTV(tree->m_root, localBounds, compoundLeafCallback);
-                        }
-                        else
-                        {
-                            // If there's only a single child shape then there's no need to search any more, we know
-                            // which child overlaps
-                            BroadphaseResult result = {co, 0};
-                            mResults.push_back(result);
-                        }
-                    }
-                    else
-                    {
-                        BroadphaseResult result = {co, -1};
-                        mResults.push_back(result);
-                    }
-                    return true;
-                }
-            }
-            return false;
-        }
-    };
-
-    RecoverBroadPhaseCallback recoverBroadResult(mRigidBody, 1 /* collision layer */, 0xFFFF /* collision mask */,
-                                                 minAabb, maxAabb);
-    collisionWorld->getBroadphase()->aabbTest(minAabb, maxAabb, recoverBroadResult);
-
-    bool penetration = false;
-
-    /*    collisionWorld->getDispatcher()->dispatchAllCollisionPairs(
-            m_ghostObject->getOverlappingPairCache(), collisionWorld->getDispatchInfo(),
-       collisionWorld->getDispatcher());
-
-        m_currentPosition = m_ghostObject->getWorldTransform().getOrigin();
-
-        //	btScalar maxPen = btScalar(0.0);
-        for (int i = 0; i < m_ghostObject->getOverlappingPairCache()->getNumOverlappingPairs(); i++)
-        {
-            m_manifoldArray.resize(0);
-
-            btBroadphasePair* collisionPair = &m_ghostObject->getOverlappingPairCache()->getOverlappingPairArray()[i];
-
-            btCollisionObject* obj0 = static_cast<btCollisionObject*>(collisionPair->m_pProxy0->m_clientObject);
-            btCollisionObject* obj1 = static_cast<btCollisionObject*>(collisionPair->m_pProxy1->m_clientObject);
-
-            if ((obj0 && !obj0->hasContactResponse()) || (obj1 && !obj1->hasContactResponse()))
-                continue;
-
-            if (!needsCollision(obj0, obj1))
-                continue;
-
-            if (collisionPair->m_algorithm)
-                collisionPair->m_algorithm->getAllContactManifolds(m_manifoldArray);
-
-            for (int j = 0; j < m_manifoldArray.size(); j++)
-            {
-                btPersistentManifold* manifold = m_manifoldArray[j];
-                btScalar directionSign = manifold->getBody0() == m_ghostObject ? btScalar(-1.0) : btScalar(1.0);
-                for (int p = 0; p < manifold->getNumContacts(); p++)
-                {
-                    const btManifoldPoint& pt = manifold->getContactPoint(p);
-
-                    btScalar dist = pt.getDistance();
-
-                    if (dist < -m_maxPenetrationDepth)
-                    {
-                        // TODO: cause problems on slopes, not sure if it is needed
-                        // if (dist < maxPen)
-                        //{
-                        //	maxPen = dist;
-                        //	m_touchingNormal = pt.m_normalWorldOnB * directionSign;//??
-
-                        //}
-                        m_currentPosition += pt.m_normalWorldOnB * directionSign * dist * btScalar(0.2);
-                        penetration = true;
-                    }
-                    else
-                    {
-                        // printf("touching %f\n", dist);
-                    }
-                }
-
-                // manifold->clearManifold();
-            }
-        }
-        btTransform newTrans = m_ghostObject->getWorldTransform();
-        newTrans.setOrigin(m_currentPosition);
-        m_ghostObject->setWorldTransform(newTrans);
-        //	printf("m_touchingNormal = %f,%f,%f\n",m_touchingNormal[0],m_touchingNormal[1],m_touchingNormal[2]);
-    */
-    // Perform narrowphase per shape
-    // godot: for (int kinIndex = p_body->get_kinematic_utilities()->shapes.size() - 1; 0 <= kinIndex; --kinIndex)
-    for (int kinIndex = 0; kinIndex < (int)mCollisionShapes.size(); kinIndex++)
-    {
-        if (mCollisionShapes[kinIndex]->getShapeType() == EMPTY_SHAPE_PROXYTYPE)
-        {
-            continue;
-        }
-
-        btTransform shapeTransform = bodyPosition * mCollisionTransforms[kinIndex];
-        shapeTransform.getOrigin() += mDeltaRecoverMovement;
-
-        for (int i = recoverBroadResult.mResults.size() - 1; 0 <= i; --i)
-        {
-            btCollisionObject* otherObject = recoverBroadResult.mResults[i].mCollisionObject;
-
-            /*
-            CollisionObjectBullet* gObj = static_cast<CollisionObjectBullet*>(otherObject->getUserPointer());
-            if (p_exclude.has(gObj->get_self()))
-            {
-                continue;
-            }
-            */
-
-            if (mInfiniteInertia && !otherObject->isStaticOrKinematicObject())
-            {
-                otherObject->activate(); // Force activation of hitten rigid, soft body
-                continue;
-            }
-            else if (!mRigidBody->checkCollideWith(otherObject) || !otherObject->checkCollideWith(mRigidBody))
-            {
-                continue;
-            }
-
-            if (otherObject->getCollisionShape()->isCompound())
-            {
-                const btCompoundShape* cs = static_cast<const btCompoundShape*>(otherObject->getCollisionShape());
-                if (cs->getNumChildShapes() == 0)
-                {
-                    continue; // No shapes to depenetrate from.
-                }
-                int shapeIdx = recoverBroadResult.mResults[i].mCompoundChildIndex;
-                if (shapeIdx < 0 || shapeIdx > cs->getNumChildShapes())
-                    return false;
-
-                if (cs->getChildShape(shapeIdx)->isConvex())
-                {
-                    if (RFP_convex_convex_test(mCollisionShapes[kinIndex],
-                                               static_cast<const btConvexShape*>(cs->getChildShape(shapeIdx)),
-                                               otherObject, kinIndex, shapeIdx, shapeTransform,
-                                               otherObject->getWorldTransform() * cs->getChildTransform(shapeIdx),
-                                               mRecoverMovementScale, mDeltaRecoverMovement, rresult))
-                    {
-                        penetration = true;
-                    }
-                }
-                else
-                {
-                    if (RFP_convex_world_test(mCollisionShapes[kinIndex], cs->getChildShape(shapeIdx), mRigidBody,
-                                              otherObject, kinIndex, shapeIdx, shapeTransform,
-                                              otherObject->getWorldTransform() * cs->getChildTransform(shapeIdx),
-                                              mRecoverMovementScale, mDeltaRecoverMovement, rresult))
-                    {
-                        penetration = true;
-                    }
-                }
-            }
-            else if (otherObject->getCollisionShape()->isConvex())
-            { /// Execute GJK test against object shape
-                if (RFP_convex_convex_test(mCollisionShapes[kinIndex],
-                                           static_cast<const btConvexShape*>(otherObject->getCollisionShape()),
-                                           otherObject, kinIndex, 0, shapeTransform, otherObject->getWorldTransform(),
-                                           mRecoverMovementScale, mDeltaRecoverMovement, rresult))
-                {
-                    penetration = true;
-                }
-            }
-            else
-            {
-                if (RFP_convex_world_test(mCollisionShapes[kinIndex], otherObject->getCollisionShape(), mRigidBody,
-                                          otherObject, kinIndex, 0, shapeTransform, otherObject->getWorldTransform(),
-                                          mRecoverMovementScale, mDeltaRecoverMovement, rresult))
-                {
-                    penetration = true;
-                }
-            }
-        }
-    }
-
-    return penetration;
-}
-#endif
 bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWorld)
 {
     // Here we must refresh the overlapping paircache as the penetrating movement itself or the
@@ -1290,8 +860,13 @@ bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWo
         btCollisionObject* obj0 = static_cast<btCollisionObject*>(collisionPair->m_pProxy0->m_clientObject);
         btCollisionObject* obj1 = static_cast<btCollisionObject*>(collisionPair->m_pProxy1->m_clientObject);
 
+#if 0
         if ((obj0 && !obj0->hasContactResponse()) || (obj1 && !obj1->hasContactResponse()))
+        {
+            std::cout << "No contact response\n";
             continue;
+        }
+#endif
 
         if (!needsCollision(obj0, obj1))
             continue;
@@ -1334,6 +909,7 @@ bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWo
     newTrans.setOrigin(mCurrentPosition);
     mGhostObject->setWorldTransform(newTrans);
     //	printf("m_touchingNormal = %f,%f,%f\n",m_touchingNormal[0],m_touchingNormal[1],m_touchingNormal[2]);
+    //    std::cout << "penetration: " << penetration << "\n";
     return penetration;
 }
 bool KinematicMotionSimple::needsCollision(const btCollisionObject* body0, const btCollisionObject* body1)
@@ -1346,27 +922,22 @@ bool KinematicMotionSimple::needsCollision(const btCollisionObject* body0, const
 }
 void KinematicMotionSimple::preStep(btCollisionWorld* collisionWorld)
 {
+    btTransform nodeXform;
+    nodeXform.setRotation(convert(mNode->getOrientation()));
+    nodeXform.setOrigin(convert(mNode->getPosition()));
+    mGhostObject->setWorldTransform(nodeXform);
     mCurrentPosition = mGhostObject->getWorldTransform().getOrigin();
-    //	m_targetPosition = m_currentPosition;
 
     mCurrentOrientation = mGhostObject->getWorldTransform().getRotation();
-    //	m_targetOrientation = m_currentOrientation;
-    //	printf("m_targetPosition=%f,%f,%f\n",m_targetPosition[0],m_targetPosition[1],m_targetPosition[2]);
 }
 void KinematicMotionSimple::playerStep(btCollisionWorld* collisionWorld, btScalar dt)
 {
-
     int numPenetrationLoops = 0;
-    //	m_touchingContact = false;
     while (recoverFromPenetration(collisionWorld))
     {
         numPenetrationLoops++;
-        //		m_touchingContact = true;
-        if (numPenetrationLoops > 4)
-        {
-            // printf("character could not recover from penetration = %d\n", numPenetrationLoops);
+        if (numPenetrationLoops > 6)
             break;
-        }
     }
 }
 
@@ -1374,14 +945,20 @@ void KinematicMotionSimple::updateAction(btCollisionWorld* collisionWorld, btSca
 {
     preStep(collisionWorld);
     playerStep(collisionWorld, deltaTimeStep);
+    btTransform xform = mGhostObject->getWorldTransform();
+    mNode->setPosition(convert(xform.getOrigin()));
+    mNode->setOrientation(convert(xform.getRotation()));
 }
 void KinematicMotionSimple::debugDraw(btIDebugDraw* debugDrawer) {}
 void KinematicMotionSimple::setupCollisionShapes(btCollisionObject* body)
 {
     std::list<std::pair<btCompoundShape*, btTransform>> shape_list;
     btCollisionShape* root_shape = body->getCollisionShape();
+    OgreAssert(root_shape, "No collision shape");
     btTransform root_xform;
     root_xform.setIdentity();
+    // std::cout << "shape: " << root_shape << " is compound: " << root_shape->isCompound() << "\n";
+    // std::cout << "shape: " << root_shape << " is convex: " << root_shape->isConvex() << "\n";
     if (root_shape->isCompound())
     {
         btCompoundShape* cshape = static_cast<btCompoundShape*>(root_shape);
@@ -1397,10 +974,15 @@ void KinematicMotionSimple::setupCollisionShapes(btCollisionObject* body)
         int i;
         std::pair<btCompoundShape*, btTransform> s = shape_list.front();
         shape_list.pop_front();
+        //        std::cout << "compound shape: " << s.first << "\n";
         for (i = 0; i < s.first->getNumChildShapes(); i++)
         {
             btCollisionShape* shape = s.first->getChildShape(i);
+            //            std::cout << "\tchild shape: " << i << " " << shape;
+            //            std::cout << "\tchild shape: " << i << " is compound: " << shape->isCompound();
+            //            std::cout << "\tchild shape: " << i << " is convex: " << shape->isConvex();
             btTransform xform = s.second * s.first->getChildTransform(i);
+            //            std::cout << i << ": " << shape << "\n";
             if (shape->isConvex())
             {
                 mCollisionShapes.push_back(shape);
@@ -1411,14 +993,22 @@ void KinematicMotionSimple::setupCollisionShapes(btCollisionObject* body)
                 btCompoundShape* cshape = static_cast<btCompoundShape*>(shape);
                 shape_list.push_back({cshape, xform});
             }
+            else
+                OgreAssert(false, "Bad shape");
         }
     }
+    OgreAssert(mCollisionShapes.size() > 0, "No collision shapes");
 }
-KinematicMotionSimple::KinematicMotionSimple(btPairCachingGhostObject* ghostObject)
-    : btActionInterface(), mGhostObject(ghostObject)
+KinematicMotionSimple::KinematicMotionSimple(btPairCachingGhostObject* ghostObject, Node* node)
+    : btActionInterface(), mGhostObject(ghostObject), mNode(node)
 {
+    btTransform nodeXform;
+    nodeXform.setRotation(convert(node->getOrientation()));
+    nodeXform.setOrigin(convert(node->getPosition()));
+    ghostObject->setWorldTransform(nodeXform);
     setupCollisionShapes(ghostObject);
 }
+KinematicMotionSimple::~KinematicMotionSimple() {}
 
 } // namespace Bullet
 } // namespace Ogre

@@ -111,9 +111,10 @@ protected:
     std::unique_ptr<btBroadphaseInterface> mBroadphase;
 
     btCollisionWorld* mBtWorld;
+    btGhostPairCallback* mGhostPairCallback;
 
 public:
-    CollisionWorld(btCollisionWorld* btWorld) : mBtWorld(btWorld) {}
+    CollisionWorld(btCollisionWorld* btWorld) : mBtWorld(btWorld), mGhostPairCallback(nullptr) {}
     virtual ~CollisionWorld();
 
     btCollisionObject* addCollisionObject(Entity* ent, ColliderType ct, int group = 1, int mask = -1);
@@ -122,48 +123,7 @@ public:
     void attachCollisionObject(btCollisionObject* collisionObject, Entity* ent, int group = 1, int mask = -1);
 };
 
-#if 0
-class KinematicMotion : public btActionInterface
-{
-    btRigidBody* mRigidBody;
-    std::vector<btCollisionShape*> mCollisionShapes;
-    std::vector<btTransform> mCollisionTransforms;
-    btVector3 mDeltaRecoverMovement;
-    bool mInfiniteInertia;
-    btScalar mRecoverMovementScale;
-
-    btPairCachingGhostObject* mGhostObject;
-
-public:
-    struct RecoverResult
-    {
-        bool mHasPenetration;
-        btVector3 mNormal;
-        btVector3 mPointWorld;
-        btScalar mPenetrationDistance; // Negative mean penetration
-        int mOtherCompoundShapeIndex;
-        const btCollisionObject* mOtherCollisionObject;
-        int mLocalShapeMostRecovered;
-
-        RecoverResult()
-            : mHasPenetration(false), mNormal(0, 0, 0), mPointWorld(0, 0, 0), mPenetrationDistance(1e20),
-              mOtherCompoundShapeIndex(0), mOtherCollisionObject(nullptr), mLocalShapeMostRecovered(0)
-        {
-        }
-    };
-    void setupCollisionShapes(btRigidBody* body);
-    bool RFP_convex_convex_test(const btConvexShape* shapeA, const btConvexShape* shapeB, btCollisionObject* objectB,
-                                int shapeIdA, int shapeIdB, const btTransform& transformA,
-                                const btTransform& transformB, btScalar recoverMovementScale,
-                                btVector3& deltaRecoverMovement, RecoverResult* rresult);
-    bool RFP_convex_world_test(btDynamicsWorld* dynamicsWorld, const btConvexShape* shapeA,
-                               const btCollisionShape* shapeB, btCollisionObject* objectA, btCollisionObject* objectB,
-                               int shapeIdA, int shapeIdB, const btTransform& transformA, const btTransform& transformB,
-                               btScalar recoverMovementScale, btVector3& deltaRecoverMovement, RecoverResult* rresult);
-    bool recoverFromPenetration(btCollisionWorld* collisionWorld, const btTransform& bodyPosition,
-                                RecoverResult& rresult);
-};
-#endif
+/// helper class for kinematic body motion
 class _OgreBulletExport KinematicMotionSimple : public btActionInterface
 {
     std::vector<btCollisionShape*> mCollisionShapes;
@@ -173,13 +133,14 @@ class _OgreBulletExport KinematicMotionSimple : public btActionInterface
     btQuaternion mCurrentOrientation;
     btManifoldArray mManifoldArray;
     btScalar mMaxPenetrationDepth;
+    Node* mNode;
     virtual bool needsCollision(const btCollisionObject* body0, const btCollisionObject* body1);
     void preStep(btCollisionWorld* collisionWorld);
     void playerStep(btCollisionWorld* collisionWorld, btScalar dt);
     void setupCollisionShapes(btCollisionObject* body);
 
 public:
-    KinematicMotionSimple(btPairCachingGhostObject* ghostObject);
+    KinematicMotionSimple(btPairCachingGhostObject* ghostObject, Node* node);
     ~KinematicMotionSimple();
     bool recoverFromPenetration(btCollisionWorld* collisionWorld);
     virtual void updateAction(btCollisionWorld* collisionWorld, btScalar deltaTimeStep);
