@@ -4,10 +4,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "OgreBullet.h"
-#include <BulletCollision/NarrowPhaseCollision/btGjkEpaPenetrationDepthSolver.h>
-#include <BulletCollision/NarrowPhaseCollision/btGjkPairDetector.h>
-#include <BulletCollision/NarrowPhaseCollision/btPointCollector.h>
-#include <iostream>
 
 namespace Ogre
 {
@@ -96,7 +92,10 @@ btCylinderShape* createCylinderCollider(const MovableObject* mo)
 }
 
 /// create compound shape because we can
-btCompoundShape* createCompoundShape() { return new btCompoundShape; }
+btCompoundShape* createCompoundShape()
+{
+	return new btCompoundShape;
+}
 
 struct EntityCollisionListener
 {
@@ -170,10 +169,16 @@ private:
 };
 
 /// create trimesh collider using ogre provided data
-btBvhTriangleMeshShape* createTrimeshCollider(const Entity* ent) { return VertexIndexToShape(ent).createTrimesh(); }
+btBvhTriangleMeshShape* createTrimeshCollider(const Entity* ent)
+{
+        return VertexIndexToShape(ent).createTrimesh();
+}
 
 /// create convex hull collider using ogre provided data
-btConvexHullShape* createConvexHullCollider(const Entity* ent) { return VertexIndexToShape(ent).createConvex(); }
+btConvexHullShape* createConvexHullCollider(const Entity* ent)
+{
+	return VertexIndexToShape(ent).createConvex();
+}
 
 /// wrapper with automatic memory management
 class CollisionObject
@@ -203,8 +208,7 @@ public:
     }
 };
 
-DynamicsWorld::DynamicsWorld(const Vector3& gravity)
-    : CollisionWorld(NULL) // prevent CollisionWorld from creating a world
+DynamicsWorld::DynamicsWorld(const Vector3& gravity) : CollisionWorld(NULL) // prevent CollisionWorld from creating a world
 {
     // Bullet initialisation.
     mCollisionConfig.reset(new btDefaultCollisionConfiguration());
@@ -212,8 +216,7 @@ DynamicsWorld::DynamicsWorld(const Vector3& gravity)
     mSolver.reset(new btSequentialImpulseConstraintSolver());
     mBroadphase.reset(new btDbvtBroadphase());
 
-    auto btworld =
-        new btDiscreteDynamicsWorld(mDispatcher.get(), mBroadphase.get(), mSolver.get(), mCollisionConfig.get());
+    auto btworld = new btDiscreteDynamicsWorld(mDispatcher.get(), mBroadphase.get(), mSolver.get(), mCollisionConfig.get());
     btworld->setGravity(convert(gravity));
     btworld->setInternalTickCallback(onTick);
     mGhostPairCallback = new btGhostPairCallback();
@@ -289,8 +292,10 @@ btRigidBody* DynamicsWorld::addRigidBody(float mass, Entity* ent, ColliderType c
 btRigidBody* DynamicsWorld::addKinematicRigidBody(Entity* ent, ColliderType ct, int group, int mask)
 {
     btRigidBody* rb = addRigidBody(0, ent, ct, nullptr, group, mask);
-    rb->setCollisionFlags(rb->getCollisionFlags() | btCollisionObject::CF_KINEMATIC_OBJECT |
-                          btCollisionObject::CF_NO_CONTACT_RESPONSE);
+    rb->setCollisionFlags(rb->getCollisionFlags()
+                    | btCollisionObject::CF_KINEMATIC_OBJECT
+                    | btCollisionObject::CF_NO_CONTACT_RESPONSE
+                    );
     rb->setActivationState(DISABLE_DEACTIVATION);
     return rb;
 }
@@ -313,18 +318,17 @@ btCollisionObject* CollisionWorld::addCollisionObject(Entity* ent, ColliderType 
     return co;
 }
 
-void DynamicsWorld::attachRigidBody(btRigidBody* rigidBody, Entity* ent, CollisionListener* listener, int group,
-                                    int mask)
+void DynamicsWorld::attachRigidBody(btRigidBody *rigidBody, Entity* ent, CollisionListener* listener,
+                                         int group, int mask)
 {
     auto node = ent->getParentSceneNode();
     OgreAssert(node, "entity must be attached");
     /* If the body has incorrect btMotionState and is in world
      * we will crash or corrupt some memory. Hope the user
      * will know what he/she is doing */
-    if (!rigidBody->isInWorld())
-    {
+    if (!rigidBody->isInWorld()) {
         RigidBodyState* state = new RigidBodyState(node);
-        rigidBody->setMotionState(state);
+	rigidBody->setMotionState(state);
         getBtWorld()->addRigidBody(rigidBody, group, mask);
     }
     rigidBody->setUserPointer(new EntityCollisionListener{ent, listener});
@@ -659,7 +663,7 @@ VertexIndexToShape::~VertexIndexToShape()
 
     if (mBoneIndex)
     {
-        for (auto& i : *mBoneIndex)
+        for (auto & i : *mBoneIndex)
         {
             delete i.second;
         }
@@ -795,6 +799,7 @@ void DebugDrawer::drawLine(const btVector3& from, const btVector3& to, const btV
     mLines.colour(col);
 }
 
+/* Taken from btKinematicCharacterController */
 bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWorld)
 {
     // Here we must refresh the overlapping paircache as the penetrating movement itself or the
@@ -809,6 +814,7 @@ bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWo
     bool shapes_found = false;
     btTransform bodyPosition = mGhostObject->getWorldTransform();
 
+    /* This is taken from Godot to implement btCompoundShape here */
     for (int kinIndex = 0; kinIndex < (int)mCollisionShapes.size(); kinIndex++)
     {
 
@@ -850,7 +856,7 @@ bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWo
 
     mCurrentPosition = mGhostObject->getWorldTransform().getOrigin();
 
-    //	btScalar maxPen = btScalar(0.0);
+    /* Narrow phase supports btCollisionShape already */
     for (int i = 0; i < mGhostObject->getOverlappingPairCache()->getNumOverlappingPairs(); i++)
     {
         mManifoldArray.resize(0);
@@ -860,13 +866,13 @@ bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWo
         btCollisionObject* obj0 = static_cast<btCollisionObject*>(collisionPair->m_pProxy0->m_clientObject);
         btCollisionObject* obj1 = static_cast<btCollisionObject*>(collisionPair->m_pProxy1->m_clientObject);
 
-#if 0
+        /* TODO: implement filtering
         if ((obj0 && !obj0->hasContactResponse()) || (obj1 && !obj1->hasContactResponse()))
         {
             std::cout << "No contact response\n";
             continue;
         }
-#endif
+        */
 
         if (!needsCollision(obj0, obj1))
             continue;
@@ -896,20 +902,12 @@ bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWo
                     mCurrentPosition += pt.m_normalWorldOnB * directionSign * dist * btScalar(0.2);
                     penetration = true;
                 }
-                else
-                {
-                    // printf("touching %f\n", dist);
-                }
             }
-
-            // manifold->clearManifold();
         }
     }
     btTransform newTrans = mGhostObject->getWorldTransform();
     newTrans.setOrigin(mCurrentPosition);
     mGhostObject->setWorldTransform(newTrans);
-    //	printf("m_touchingNormal = %f,%f,%f\n",m_touchingNormal[0],m_touchingNormal[1],m_touchingNormal[2]);
-    //    std::cout << "penetration: " << penetration << "\n";
     return penetration;
 }
 bool KinematicMotionSimple::needsCollision(const btCollisionObject* body0, const btCollisionObject* body1)

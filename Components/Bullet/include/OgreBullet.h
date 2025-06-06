@@ -19,8 +19,8 @@ namespace Bullet
 {
 
 /** \addtogroup Optional
- *  @{
- */
+*  @{
+*/
 /** \defgroup Bullet Bullet
  * [Bullet-Physics](https://pybullet.org) to %Ogre connection
  * @{
@@ -120,7 +120,7 @@ public:
     btCollisionObject* addCollisionObject(Entity* ent, ColliderType ct, int group = 1, int mask = -1);
 
     void rayTest(const Ray& ray, RayResultCallback* callback, float maxDist = 1000);
-    void attachCollisionObject(btCollisionObject* collisionObject, Entity* ent, int group = 1, int mask = -1);
+    void attachCollisionObject(btCollisionObject *collisionObject, Entity *ent, int group = 1, int mask = -1);
 };
 
 /// helper class for kinematic body motion
@@ -166,8 +166,8 @@ public:
     btRigidBody* addRigidBody(float mass, Entity* ent, ColliderType ct, CollisionListener* listener = nullptr,
                               int group = 1, int mask = -1);
     btRigidBody* addKinematicRigidBody(Entity* ent, ColliderType ct, int group = 1, int mask = -1);
-    void attachRigidBody(btRigidBody* rigidBody, Entity* ent, CollisionListener* listener = nullptr, int group = 1,
-                         int mask = -1);
+    void attachRigidBody(btRigidBody *rigidBody, Entity *ent, CollisionListener* listener = nullptr,
+                              int group = 1, int mask = -1);
     btDynamicsWorld* getBtWorld() const { return static_cast<btDynamicsWorld*>(mBtWorld); }
 };
 
@@ -203,10 +203,7 @@ public:
         drawLine(PointOnB, PointOnB + normalOnB * distance * 20, color);
     }
 
-    void reportErrorWarning(const char* warningString) override
-    {
-        LogManager::getSingleton().logWarning(warningString);
-    }
+    void reportErrorWarning(const char* warningString) override { LogManager::getSingleton().logWarning(warningString); }
 
     void draw3dText(const btVector3& location, const char* textString) override {}
 
