@@ -4,6 +4,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "OgreBullet.h"
+#include <BulletCollision/NarrowPhaseCollision/btGjkEpaPenetrationDepthSolver.h>
+#include <BulletCollision/NarrowPhaseCollision/btGjkPairDetector.h>
+#include <BulletCollision/NarrowPhaseCollision/btPointCollector.h>
+#include <iostream>
 
 namespace Ogre
 {
@@ -92,10 +96,7 @@ btCylinderShape* createCylinderCollider(const MovableObject* mo)
 }
 
 /// create compound shape because we can
-btCompoundShape* createCompoundShape()
-{
-	return new btCompoundShape;
-}
+btCompoundShape* createCompoundShape() { return new btCompoundShape; }
 
 struct EntityCollisionListener
 {
@@ -169,16 +170,10 @@ private:
 };
 
 /// create trimesh collider using ogre provided data
-btBvhTriangleMeshShape* createTrimeshCollider(const Entity* ent)
-{
-        return VertexIndexToShape(ent).createTrimesh();
-}
+btBvhTriangleMeshShape* createTrimeshCollider(const Entity* ent) { return VertexIndexToShape(ent).createTrimesh(); }
 
 /// create convex hull collider using ogre provided data
-btConvexHullShape* createConvexHullCollider(const Entity* ent)
-{
-	return VertexIndexToShape(ent).createConvex();
-}
+btConvexHullShape* createConvexHullCollider(const Entity* ent) { return VertexIndexToShape(ent).createConvex(); }
 
 /// wrapper with automatic memory management
 class CollisionObject
@@ -208,7 +203,8 @@ public:
     }
 };
 
-DynamicsWorld::DynamicsWorld(const Vector3& gravity) : CollisionWorld(NULL) // prevent CollisionWorld from creating a world
+DynamicsWorld::DynamicsWorld(const Vector3& gravity)
+    : CollisionWorld(NULL) // prevent CollisionWorld from creating a world
 {
     // Bullet initialisation.
     mCollisionConfig.reset(new btDefaultCollisionConfiguration());
@@ -216,7 +212,8 @@ DynamicsWorld::DynamicsWorld(const Vector3& gravity) : CollisionWorld(NULL) // p
     mSolver.reset(new btSequentialImpulseConstraintSolver());
     mBroadphase.reset(new btDbvtBroadphase());
 
-    auto btworld = new btDiscreteDynamicsWorld(mDispatcher.get(), mBroadphase.get(), mSolver.get(), mCollisionConfig.get());
+    auto btworld =
+        new btDiscreteDynamicsWorld(mDispatcher.get(), mBroadphase.get(), mSolver.get(), mCollisionConfig.get());
     btworld->setGravity(convert(gravity));
     btworld->setInternalTickCallback(onTick);
     mBtWorld = btworld;
@@ -253,8 +250,8 @@ static btCollisionShape* getCollisionShape(Entity* ent, ColliderType ct)
         cs = createConvexHullCollider(ent);
         break;
     case CT_COMPOUND:
-	cs = createCompoundShape();
-	break;
+        cs = createCompoundShape();
+        break;
     }
 
     if (ent->hasSkeleton())
@@ -290,10 +287,8 @@ btRigidBody* DynamicsWorld::addRigidBody(float mass, Entity* ent, ColliderType c
 btRigidBody* DynamicsWorld::addKinematicRigidBody(Entity* ent, ColliderType ct, int group, int mask)
 {
     btRigidBody* rb = addRigidBody(0, ent, ct, nullptr, group, mask);
-    rb->setCollisionFlags(rb->getCollisionFlags()
-                    | btCollisionObject::CF_KINEMATIC_OBJECT
-                    | btCollisionObject::CF_NO_CONTACT_RESPONSE
-                    );
+    rb->setCollisionFlags(rb->getCollisionFlags() | btCollisionObject::CF_KINEMATIC_OBJECT |
+                          btCollisionObject::CF_NO_CONTACT_RESPONSE);
     rb->setActivationState(DISABLE_DEACTIVATION);
     return rb;
 }
@@ -316,17 +311,18 @@ btCollisionObject* CollisionWorld::addCollisionObject(Entity* ent, ColliderType 
     return co;
 }
 
-void DynamicsWorld::attachRigidBody(btRigidBody *rigidBody, Entity* ent, CollisionListener* listener,
-                                         int group, int mask)
+void DynamicsWorld::attachRigidBody(btRigidBody* rigidBody, Entity* ent, CollisionListener* listener, int group,
+                                    int mask)
 {
     auto node = ent->getParentSceneNode();
     OgreAssert(node, "entity must be attached");
     /* If the body has incorrect btMotionState and is in world
      * we will crash or corrupt some memory. Hope the user
      * will know what he/she is doing */
-    if (!rigidBody->isInWorld()) {
+    if (!rigidBody->isInWorld())
+    {
         RigidBodyState* state = new RigidBodyState(node);
-	rigidBody->setMotionState(state);
+        rigidBody->setMotionState(state);
         getBtWorld()->addRigidBody(rigidBody, group, mask);
     }
     rigidBody->setUserPointer(new EntityCollisionListener{ent, listener});
@@ -334,7 +330,7 @@ void DynamicsWorld::attachRigidBody(btRigidBody *rigidBody, Entity* ent, Collisi
     auto objWrapper = std::make_shared<RigidBody>(rigidBody, mBtWorld);
     node->getUserObjectBindings().setUserAny("BtCollisionObject", objWrapper);
 }
-void CollisionWorld::attachCollisionObject(btCollisionObject *collisionObject, Entity* ent, int group, int mask)
+void CollisionWorld::attachCollisionObject(btCollisionObject* collisionObject, Entity* ent, int group, int mask)
 {
     auto node = ent->getParentSceneNode();
     OgreAssert(node, "entity must be attached");
@@ -369,345 +365,6 @@ void CollisionWorld::rayTest(const Ray& ray, RayResultCallback* callback, float 
     btVector3 to = convert(ray.getPoint(maxDist));
     mBtWorld->rayTest(from, to, wrapper);
 }
-#if 0
-bool DynamicsWorld::recover_from_penetration(btRigidBody *body, const btTransform &body_position, btScalar recover_movement_scale, bool infinite_inertia, btVector3 &delta_recover_movement, RecoverResult *r_recover_result, const std::set &exclude) {
-	// Calculate the cumulative AABB of all shapes of the kinematic body
-	btVector3 aabb_min, aabb_max;
-	bool shapes_found = false;
-
-	for (int kinIndex = p_body->get_kinematic_utilities()->shapes.size() - 1; 0 <= kinIndex; --kinIndex) {
-		const RigidBodyBullet::KinematicShape &kin_shape(p_body->get_kinematic_utilities()->shapes[kinIndex]);
-		if (!kin_shape.is_active()) {
-			continue;
-		}
-
-		if (kin_shape.shape->getShapeType() == CUSTOM_CONVEX_SHAPE_TYPE) {
-			// Skip rayshape in order to implement custom separation process
-			continue;
-		}
-
-		btTransform shape_transform = p_body_position * kin_shape.transform;
-		shape_transform.getOrigin() += r_delta_recover_movement;
-
-		btVector3 shape_aabb_min, shape_aabb_max;
-		kin_shape.shape->getAabb(shape_transform, shape_aabb_min, shape_aabb_max);
-
-		if (!shapes_found) {
-			aabb_min = shape_aabb_min;
-			aabb_max = shape_aabb_max;
-			shapes_found = true;
-		} else {
-			aabb_min.setX((aabb_min.x() < shape_aabb_min.x()) ? aabb_min.x() : shape_aabb_min.x());
-			aabb_min.setY((aabb_min.y() < shape_aabb_min.y()) ? aabb_min.y() : shape_aabb_min.y());
-			aabb_min.setZ((aabb_min.z() < shape_aabb_min.z()) ? aabb_min.z() : shape_aabb_min.z());
-
-			aabb_max.setX((aabb_max.x() > shape_aabb_max.x()) ? aabb_max.x() : shape_aabb_max.x());
-			aabb_max.setY((aabb_max.y() > shape_aabb_max.y()) ? aabb_max.y() : shape_aabb_max.y());
-			aabb_max.setZ((aabb_max.z() > shape_aabb_max.z()) ? aabb_max.z() : shape_aabb_max.z());
-		}
-	}
-
-	// If there are no shapes then there is no penetration either
-	if (!shapes_found) {
-		return false;
-	}
-
-	// Perform broadphase test
-	RecoverPenetrationBroadPhaseCallback recover_broad_result(p_body->get_bt_collision_object(), p_body->get_collision_layer(), p_body->get_collision_mask(), aabb_min, aabb_max);
-	dynamicsWorld->getBroadphase()->aabbTest(aabb_min, aabb_max, recover_broad_result);
-
-	bool penetration = false;
-
-	// Perform narrowphase per shape
-	for (int kinIndex = p_body->get_kinematic_utilities()->shapes.size() - 1; 0 <= kinIndex; --kinIndex) {
-		const RigidBodyBullet::KinematicShape &kin_shape(p_body->get_kinematic_utilities()->shapes[kinIndex]);
-		if (!kin_shape.is_active()) {
-			continue;
-		}
-
-		if (kin_shape.shape->getShapeType() == CUSTOM_CONVEX_SHAPE_TYPE) {
-			// Skip rayshape in order to implement custom separation process
-			continue;
-		}
-
-		if (kin_shape.shape->getShapeType() == EMPTY_SHAPE_PROXYTYPE) {
-			continue;
-		}
-
-		btTransform shape_transform = p_body_position * kin_shape.transform;
-		shape_transform.getOrigin() += r_delta_recover_movement;
-
-		for (int i = recover_broad_result.results.size() - 1; 0 <= i; --i) {
-			btCollisionObject *otherObject = recover_broad_result.results[i].collision_object;
-
-			CollisionObjectBullet *gObj = static_cast<CollisionObjectBullet *>(otherObject->getUserPointer());
-			if (p_exclude.has(gObj->get_self())) {
-				continue;
-			}
-
-			if (p_infinite_inertia && !otherObject->isStaticOrKinematicObject()) {
-				otherObject->activate(); // Force activation of hitten rigid, soft body
-				continue;
-			} else if (!p_body->get_bt_collision_object()->checkCollideWith(otherObject) || !otherObject->checkCollideWith(p_body->get_bt_collision_object())) {
-				continue;
-			}
-
-			if (otherObject->getCollisionShape()->isCompound()) {
-				const btCompoundShape *cs = static_cast<const btCompoundShape *>(otherObject->getCollisionShape());
-				if (cs->getNumChildShapes() == 0) {
-					continue; // No shapes to depenetrate from.
-				}
-				int shape_idx = recover_broad_result.results[i].compound_child_index;
-				ERR_FAIL_COND_V(shape_idx < 0 || shape_idx >= cs->getNumChildShapes(), false);
-
-				if (cs->getChildShape(shape_idx)->isConvex()) {
-					if (RFP_convex_convex_test(kin_shape.shape, static_cast<const btConvexShape *>(cs->getChildShape(shape_idx)), otherObject, kinIndex, shape_idx, shape_transform, otherObject->getWorldTransform() * cs->getChildTransform(shape_idx), p_recover_movement_scale, r_delta_recover_movement, r_recover_result)) {
-						penetration = true;
-					}
-				} else {
-					if (RFP_convex_world_test(kin_shape.shape, cs->getChildShape(shape_idx), p_body->get_bt_collision_object(), otherObject, kinIndex, shape_idx, shape_transform, otherObject->getWorldTransform() * cs->getChildTransform(shape_idx), p_recover_movement_scale, r_delta_recover_movement, r_recover_result)) {
-						penetration = true;
-					}
-				}
-			} else if (otherObject->getCollisionShape()->isConvex()) { /// Execute GJK test against object shape
-				if (RFP_convex_convex_test(kin_shape.shape, static_cast<const btConvexShape *>(otherObject->getCollisionShape()), otherObject, kinIndex, 0, shape_transform, otherObject->getWorldTransform(), p_recover_movement_scale, r_delta_recover_movement, r_recover_result)) {
-					penetration = true;
-				}
-			} else {
-				if (RFP_convex_world_test(kin_shape.shape, otherObject->getCollisionShape(), p_body->get_bt_collision_object(), otherObject, kinIndex, 0, shape_transform, otherObject->getWorldTransform(), p_recover_movement_scale, r_delta_recover_movement, r_recover_result)) {
-					penetration = true;
-				}
-			}
-		}
-	}
-
-	return penetration;
-}
-#endif
-
-struct MotionResult {};
-
-struct TestBodyMotionStateParams {
-    btRigidBody *mBody;
-    btTransform bodyTransform;
-    bool infiniteInertia;
-    MotionResult result;
-    std::vector<btCollisionShape *> mCollisionShapes;
-    std::vector<btTransform> mCompoundShapesTransforms;
-    void getCompoundShapeList(btCollisionShape *shape, const btTransform &xform,
-                              std::list<std::pair<btCollisionShape *, btTransform> > &convex_list,
-                              std::list<std::pair<btCollisionShape *, btTransform> > &compound_list)
-    {
-        int i;
-	compound_list.clear();
-	convex_list.clear();
-	if (shape->isCompound()) {
-            btCompoundShape* cshape = static_cast<btCompoundShape*>(shape);
-            for (i = 0; i < cshape->getNumChildShapes(); i++) {
-                btCollisionShape *subshape = cshape->getChildShape(i);
-		btTransform subxform = cshape->getChildTransform(i);
-		std::pair<btCollisionShape *, btTransform> s = {subshape, xform * subxform};
-		if (subshape->isCompound())
-                    compound_list.push_back(s);
-		else
-                    convex_list.push_back(s);
-            }
-        } else if (shape->isConvex())
-            convex_list.push_back({shape, xform});
-    }
-    void buildShapeList(btRigidBody *body)
-    {
-        std::list<std::pair<btCollisionShape *, btTransform> > convex_list, compound_list;
-	btCollisionShape* shape = body->getCollisionShape();
-	getCompoundShapeList(shape, btTransform(), convex_list, compound_list);
-	while (!compound_list.empty()) {
-            std::pair<btCollisionShape *, btTransform> s = compound_list.front();
-	    compound_list.pop_front();
-            std::list<std::pair<btCollisionShape *, btTransform> > tmp_convex_list, tmp_compound_list;
-	    getCompoundShapeList(s.first, s.second, tmp_convex_list, tmp_compound_list);
-	    convex_list.splice(convex_list.end(), tmp_convex_list);
-	    compound_list.splice(compound_list.end(), tmp_compound_list);
-	    OgreAssert(tmp_convex_list.size() == 0, "Something is wrong processing convex collisions");
-	    OgreAssert(tmp_compound_list.size() == 0, "Something is wrong processing compound collisions");
-	}
-    }
-#if 0
-#if 0
-    TestBodyMotionStateParams(btRigidBody *body,
-                        const Quaternion &fromOrientation,
-                        const Vector3 &fromPosition,
-			bool infiniteInertia = true)
-        : body(body)
-        , bodyTransform(fromOrientation, fromPosition)
-        , infiniteInertia(infiniteInertia)
-    {
-        btCollisionShape *collision = body->getCollisionShape();
-	std::list<std::pair<btCollisionShape *, btTransform> > queue;
-	if (collision->isCompound())
-            queue.push_back({collision, btTransform());
-        else {
-            mCollisionShapes.push_back(collision);
-            mCollisionShapesTransforms.push_back(btTransform);
-	}
-	while (!queue.empty()) {
-		std::pair<btCollisionShape *, btTransform> item = *queue.front();
-		btCollisionShape *shape = item.first;
-		btTransform xform = item.second;
-		if (shape->isCompound()) {
-                    int i;
-                    btCompoundShape* compound = static_cast<btCollisionShape*>(compound);
-                    for (i = 0; i < compound->getNumChildShapes(); i++) {
-                        btCollisionShapes *subshape = compound->getChildShape(i);
-			btTransform subxform = compound->getChildTransform(i);
-                        if (subshape->isConvex()) {
-                            mCollisionShapes.push_back(subshape);
-                            mCollisionShapesTransforms.push_back(subxform);
-                    }
-		}
-		queue.pop_front();
-	}
-#endif
-#if 0
-	if (collision->isCompound()) {
-            int i;
-            btCompoundShape* compound = static_cast<btCollisionShape*>(compound);
-            for (i = 0; i < compound->getNumChildShapes(); i++) {
-                btCollisionShapes *subshape = compound->getChildShape(i);
-		if (subshape->isConvex())
-                    mCollisionShapes.push_back(subshape);
-            }
-	}
-#endif
-    }
-#endif
-};
-
-#if 0
-bool DynamicsWorld::test_body_motion(btRigidBody *body, const btTransform &from, const btVector3 motion,
-                          bool infinite_inertia, MotionResult *result, bool exclude_raycast_shapes,
-			  const std::set<btCollisionObject *> &exclude)
-{
-	btTransform body_transform = from;
-//	unscaleBtBasis(body_transform);
-	btVector3 initial_recover_motion(0, 0, 0);
-	{ /// Phase one - multi shapes depenetration using margin
-		int t;
-		for (t = 0; t < RECOVERING_MOVEMENT_CYCLES; t++) {
-			if (!recover_from_penetration(body, body_transform, RECOVERING_MOVEMENT_SCALE,
-						infinite_inertia, initial_recover_motion, nullptr, exclude))
-				break;
-		}
-		// Add recover movement in order to make it safe
-		body_transform.getOrigin() += initial_recover_motion;
-	}
-	Real total_length = motion.length();
-	Real unsafe_fraction = 1.0;
-	Real safe_fraction = 1.0;
-	{
-		// Phase two - sweep test, from a secure position without margin
-
-		const int shape_count(p_body->get_shape_count());
-		for (int shIndex = 0; shIndex < shape_count; ++shIndex) {
-			if (p_body->is_shape_disabled(shIndex)) {
-				continue;
-			}
-
-			if (!p_body->get_bt_shape(shIndex)->isConvex()) {
-				// Skip no convex shape
-				continue;
-			}
-
-			if (p_exclude_raycast_shapes && p_body->get_bt_shape(shIndex)->getShapeType() == CUSTOM_CONVEX_SHAPE_TYPE) {
-				// Skip rayshape in order to implement custom separation process
-				continue;
-			}
-
-			btConvexShape *convex_shape_test(static_cast<btConvexShape *>(p_body->get_bt_shape(shIndex)));
-
-			btTransform shape_world_from = body_transform * p_body->get_kinematic_utilities()->shapes[shIndex].transform;
-
-			btTransform shape_world_to(shape_world_from);
-			shape_world_to.getOrigin() += motion;
-
-			if ((shape_world_to.getOrigin() - shape_world_from.getOrigin()).fuzzyZero()) {
-				motion = btVector3(0, 0, 0);
-				break;
-			}
-
-			GodotKinClosestConvexResultCallback btResult(shape_world_from.getOrigin(), shape_world_to.getOrigin(), p_body, p_infinite_inertia, &p_exclude);
-			btResult.m_collisionFilterGroup = p_body->get_collision_layer();
-			btResult.m_collisionFilterMask = p_body->get_collision_mask();
-
-			dynamicsWorld->convexSweepTest(convex_shape_test, shape_world_from, shape_world_to, btResult, dynamicsWorld->getDispatchInfo().m_allowedCcdPenetration);
-
-			if (btResult.hasHit()) {
-				if (total_length > CMP_EPSILON) {
-					real_t hit_fraction = btResult.m_closestHitFraction * motion.length() / total_length;
-					if (hit_fraction < unsafe_fraction) {
-						unsafe_fraction = hit_fraction;
-						real_t margin = p_body->get_kinematic_utilities()->safe_margin;
-						safe_fraction = MAX(hit_fraction - (1 - ((total_length - margin) / total_length)), 0);
-					}
-				}
-
-				/// Since for each sweep test I fix the motion of new shapes in base the recover result,
-				/// if another shape will hit something it means that has a deepest penetration respect the previous shape
-				motion *= btResult.m_closestHitFraction;
-			}
-		}
-
-		body_transform.getOrigin() += motion;
-	}
-
-	bool has_penetration = false;
-
-	{ /// Phase three - contact test with margin
-
-		btVector3 __rec(0, 0, 0);
-		RecoverResult r_recover_result;
-
-		has_penetration = recover_from_penetration(p_body, body_transform, 1, p_infinite_inertia, __rec, &r_recover_result, p_exclude);
-
-		// Parse results
-		if (r_result) {
-			B_TO_G(motion + initial_recover_motion + __rec, r_result->motion);
-
-			if (has_penetration) {
-				const btRigidBody *btRigid = static_cast<const btRigidBody *>(r_recover_result.other_collision_object);
-				CollisionObjectBullet *collisionObject = static_cast<CollisionObjectBullet *>(btRigid->getUserPointer());
-
-				B_TO_G(motion, r_result->remainder); // is the remaining movements
-				r_result->remainder = p_motion - r_result->remainder;
-
-				B_TO_G(r_recover_result.pointWorld, r_result->collision_point);
-				B_TO_G(r_recover_result.normal, r_result->collision_normal);
-				B_TO_G(btRigid->getVelocityInLocalPoint(r_recover_result.pointWorld - btRigid->getWorldTransform().getOrigin()), r_result->collider_velocity); // It calculates velocity at point and assign it using special function Bullet_to_Godot
-				r_result->collider = collisionObject->get_self();
-				r_result->collider_id = collisionObject->get_instance_id();
-				r_result->collider_shape = r_recover_result.other_compound_shape_index;
-				r_result->collision_local_shape = r_recover_result.local_shape_most_recovered;
-				r_result->collision_depth = Math::abs(r_recover_result.penetration_distance);
-				r_result->collision_safe_fraction = safe_fraction;
-				r_result->collision_unsafe_fraction = unsafe_fraction;
-
-#if debug_test_motion
-				Vector3 sup_line2;
-				B_TO_G(motion, sup_line2);
-				normalLine->clear();
-				normalLine->begin(Mesh::PRIMITIVE_LINES, NULL);
-				normalLine->add_vertex(r_result->collision_point);
-				normalLine->add_vertex(r_result->collision_point + r_result->collision_normal * 10);
-				normalLine->end();
-#endif
-			} else {
-				r_result->remainder = Vector3();
-			}
-		}
-	}
-
-	return false;
-}
-#endif
 
 CollisionWorld::~CollisionWorld() { delete mBtWorld; }
 
@@ -993,7 +650,7 @@ VertexIndexToShape::~VertexIndexToShape()
 
     if (mBoneIndex)
     {
-        for (auto & i : *mBoneIndex)
+        for (auto& i : *mBoneIndex)
         {
             delete i.second;
         }
@@ -1128,5 +785,640 @@ void DebugDrawer::drawLine(const btVector3& from, const btVector3& to, const btV
     mLines.position(convert(to));
     mLines.colour(col);
 }
+#if 0
+void KinematicMotion::setupCollisionShapes(btRigidBody* body)
+{
+    std::list<std::pair<btCompoundShape*, btTransform>> shape_list;
+    btCollisionShape* root_shape = body->getCollisionShape();
+    btTransform root_xform;
+    root_xform.setIdentity();
+    if (root_shape->isCompound())
+    {
+        btCompoundShape* cshape = static_cast<btCompoundShape*>(root_shape);
+        shape_list.push_back({cshape, root_xform});
+    }
+    else
+    {
+        mCollisionShapes.push_back(root_shape);
+        mCollisionTransforms.push_back(root_xform);
+    }
+    while (!shape_list.empty())
+    {
+        int i;
+        std::pair<btCompoundShape*, btTransform> s = shape_list.front();
+        shape_list.pop_front();
+        for (i = 0; i < s.first->getNumChildShapes(); i++)
+        {
+            btCollisionShape* shape = s.first->getChildShape(i);
+            btTransform xform = s.second * s.first->getChildTransform(i);
+            if (shape->isConvex())
+            {
+                mCollisionShapes.push_back(shape);
+                mCollisionTransforms.push_back(xform);
+            }
+            else if (shape->isCompound())
+            {
+                btCompoundShape* cshape = static_cast<btCompoundShape*>(shape);
+                shape_list.push_back({cshape, xform});
+            }
+        }
+    }
+}
+bool KinematicMotion::RFP_convex_convex_test(const btConvexShape* p_shapeA, const btConvexShape* p_shapeB,
+                                             btCollisionObject* p_objectB, int p_shapeId_A, int p_shapeId_B,
+                                             const btTransform& p_transformA, const btTransform& p_transformB,
+                                             btScalar p_recover_movement_scale, btVector3& r_delta_recover_movement,
+                                             RecoverResult* r_recover_result)
+{
+    // Initialize GJK input
+    btGjkPairDetector::ClosestPointInput gjk_input;
+    gjk_input.m_transformA = p_transformA;
+    // Avoid repeat penetrations
+    gjk_input.m_transformA.getOrigin() += r_delta_recover_movement;
+    gjk_input.m_transformB = p_transformB;
+
+    // Perform GJK test
+    btPointCollector result;
+    btGjkPairDetector gjk_pair_detector(p_shapeA, p_shapeB, gjk_simplex_solver, gjk_epa_pen_solver);
+    gjk_pair_detector.getClosestPoints(gjk_input, result, nullptr);
+    if (0 > result.m_distance)
+    {
+        // Has penetration
+        r_delta_recover_movement += result.m_normalOnBInWorld * (result.m_distance * -1 * p_recover_movement_scale);
+
+        if (r_recover_result)
+        {
+            if (result.m_distance < r_recover_result->mPenetrationDistance)
+            {
+                r_recover_result->mHasPenetration = true;
+                r_recover_result->mLocalShapeMostRecovered = p_shapeId_A;
+                r_recover_result->mOtherCollisionObject = p_objectB;
+                r_recover_result->mOtherCompoundShapeIndex = p_shapeId_B;
+                r_recover_result->mPenetrationDistance = result.m_distance;
+                r_recover_result->mPointWorld = result.m_pointInWorld;
+                r_recover_result->mNormal = result.m_normalOnBInWorld;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+bool KinematicMotion::RFP_convex_world_test(btDynamicsWorld* dynamicsWorld, const btConvexShape* p_shapeA,
+                                            const btCollisionShape* p_shapeB, btCollisionObject* p_objectA,
+                                            btCollisionObject* p_objectB, int p_shapeId_A, int p_shapeId_B,
+                                            const btTransform& p_transformA, const btTransform& p_transformB,
+                                            btScalar p_recover_movement_scale, btVector3& r_delta_recover_movement,
+                                            RecoverResult* r_recover_result)
+{
+    /// Contact test
+
+    btTransform tA(p_transformA);
+    // Avoid repeat penetrations
+    tA.getOrigin() += r_delta_recover_movement;
+
+    btCollisionObjectWrapper obA(nullptr, p_shapeA, p_objectA, tA, -1, p_shapeId_A);
+    btCollisionObjectWrapper obB(nullptr, p_shapeB, p_objectB, p_transformB, -1, p_shapeId_B);
+
+    btCollisionAlgorithm* algorithm = dispatcher->findAlgorithm(&obA, &obB, nullptr, BT_CONTACT_POINT_ALGORITHMS);
+    if (algorithm)
+    {
+        GodotDeepPenetrationContactResultCallback contactPointResult(&obA, &obB);
+        // discrete collision detection query
+        algorithm->processCollision(&obA, &obB, dynamicsWorld->getDispatchInfo(), &contactPointResult);
+
+        algorithm->~btCollisionAlgorithm();
+        dispatcher->freeCollisionAlgorithm(algorithm);
+
+        if (contactPointResult.hasHit())
+        {
+            r_delta_recover_movement += contactPointResult.m_pointNormalWorld *
+                                        (contactPointResult.m_penetration_distance * -1 * p_recover_movement_scale);
+            if (r_recover_result)
+            {
+                if (contactPointResult.m_penetration_distance < r_recover_result->mPenetrationDistance)
+                {
+                    r_recover_result->mHasPenetration = true;
+                    r_recover_result->mLocalShapeMostRecovered = p_shapeId_A;
+                    r_recover_result->mOtherCollisionObject = p_objectB;
+                    r_recover_result->mOtherCompoundShapeIndex = p_shapeId_B;
+                    r_recover_result->mPenetrationDistance = contactPointResult.m_penetration_distance;
+                    r_recover_result->mPointWorld = contactPointResult.m_pointWorld;
+                    r_recover_result->mNormal = contactPointResult.m_pointNormalWorld;
+                }
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+bool KinematicMotion::recoverFromPenetration(btCollisionWorld* collisionWorld, const btTransform& bodyPosition,
+                                             RecoverResult& rresult)
+{
+    // Here we must refresh the overlapping paircache as the penetrating movement itself or the
+    // previous recovery iteration might have used setWorldTransform and pushed us into an object
+    // that is not in the previous cache contents from the last timestep, as will happen if we
+    // are pushed into a new AABB overlap. Unhandled this means the next convex sweep gets stuck.
+    //
+    // Do this by calling the broadphase's setAabb with the moved AABB, this will update the broadphase
+    // paircache and the ghostobject's internal paircache at the same time.    /BW
+
+    btVector3 minAabb, maxAabb;
+    /*
+    mCollisionShape->getAabb(mGhostObject->getWorldTransform(), minAabb, maxAabb);
+    collisionWorld->getBroadphase()->setAabb(m_ghostObject->getBroadphaseHandle(), minAabb, maxAabb,
+                                             collisionWorld->getDispatcher());
+    */
+    bool shapes_found = false;
+
+    for (int kinIndex = 0; kinIndex < (int)mCollisionShapes.size(); kinIndex++)
+    {
+
+        btTransform shapeTransform = bodyPosition * mCollisionTransforms[kinIndex];
+        shapeTransform.getOrigin() += mDeltaRecoverMovement;
+
+        btVector3 shapeAabbMin, shapeAabbMax;
+        mCollisionShapes[kinIndex]->getAabb(shapeTransform, shapeAabbMin, shapeAabbMax);
+
+        if (!shapes_found)
+        {
+            minAabb = shapeAabbMin;
+            maxAabb = shapeAabbMax;
+            shapes_found = true;
+        }
+        else
+        {
+            minAabb.setX((minAabb.x() < shapeAabbMin.x()) ? minAabb.x() : shapeAabbMin.x());
+            minAabb.setY((minAabb.y() < shapeAabbMin.y()) ? minAabb.y() : shapeAabbMin.y());
+            minAabb.setZ((minAabb.z() < shapeAabbMin.z()) ? minAabb.z() : shapeAabbMin.z());
+
+            maxAabb.setX((maxAabb.x() > shapeAabbMax.x()) ? maxAabb.x() : shapeAabbMax.x());
+            maxAabb.setY((maxAabb.y() > shapeAabbMax.y()) ? maxAabb.y() : shapeAabbMax.y());
+            maxAabb.setZ((maxAabb.z() > shapeAabbMax.z()) ? maxAabb.z() : shapeAabbMax.z());
+        }
+    }
+
+    // If there are no shapes then there is no penetration either
+    if (!shapes_found)
+    {
+        return false;
+    }
+    // Perform broadphase test
+    struct RecoverBroadPhaseCallback : public btBroadphaseAabbCallback
+    {
+    private:
+        btDbvtVolume mBounds;
+
+        const btCollisionObject* mSelfCollisionObject;
+        /*
+        uint32_t mCollisionLayer;
+        uint32_t mCollisionMask;
+        */
+
+        struct CompoundLeafCallback : btDbvt::ICollide
+        {
+        private:
+            RecoverBroadPhaseCallback* mParentCallback;
+            btCollisionObject* mCollisionObject;
+
+        public:
+            CompoundLeafCallback(RecoverBroadPhaseCallback* parentCallback, btCollisionObject* collisionObject)
+                : mParentCallback(parentCallback), mCollisionObject(collisionObject)
+            {
+            }
+
+            void Process(const btDbvtNode* leaf)
+            {
+                BroadphaseResult result = {mCollisionObject, leaf->dataAsInt};
+                mParentCallback->mResults.push_back(result);
+            }
+        };
+
+    public:
+        struct BroadphaseResult
+        {
+            btCollisionObject* mCollisionObject;
+            int mCompoundChildIndex;
+        };
+
+        std::vector<BroadphaseResult> mResults;
+
+    public:
+        RecoverBroadPhaseCallback(const btCollisionObject* selfCollisionObject, uint32_t collisionLayer,
+                                  uint32_t collisionMask, btVector3 minAabb, btVector3 maxAabb)
+            : mSelfCollisionObject(
+                  selfCollisionObject) /*, mCollisionLayer(collisionLayer), mCollisionMask(collisionMask) */
+        {
+            mBounds = btDbvtVolume::FromMM(minAabb, maxAabb);
+        }
+
+        virtual ~RecoverBroadPhaseCallback() {}
+
+        virtual bool process(const btBroadphaseProxy* proxy)
+        {
+            btCollisionObject* co = static_cast<btCollisionObject*>(proxy->m_clientObject);
+            if (co->getInternalType() <= btCollisionObject::CO_RIGID_BODY)
+            {
+                if (mSelfCollisionObject != proxy->m_clientObject /* && GodotFilterCallback::test_collision_filters(
+                        collision_layer, collision_mask, proxy->m_collisionFilterGroup, proxy->m_collisionFilterMask) */)
+                {
+                    if (co->getCollisionShape()->isCompound())
+                    {
+                        const btCompoundShape* cs = static_cast<btCompoundShape*>(co->getCollisionShape());
+
+                        if (cs->getNumChildShapes() > 1)
+                        {
+                            const btDbvt* tree = cs->getDynamicAabbTree();
+                            if (!tree)
+                                return true;
+
+                            // Transform bounds into compound shape local space
+                            const btTransform otherInCompoundSpace = co->getWorldTransform().inverse();
+                            const btMatrix3x3 absB = otherInCompoundSpace.getBasis().absolute();
+                            const btVector3 localCenter = otherInCompoundSpace(mBounds.Center());
+                            const btVector3 localExtent = mBounds.Extents().dot3(absB[0], absB[1], absB[2]);
+                            const btVector3 localMinAabb = localCenter - localExtent;
+                            const btVector3 localMaxAabb = localCenter + localExtent;
+                            const btDbvtVolume localBounds = btDbvtVolume::FromMM(localMinAabb, localMaxAabb);
+
+                            // Test collision against compound child shapes using its AABB tree
+                            CompoundLeafCallback compoundLeafCallback(this, co);
+                            tree->collideTV(tree->m_root, localBounds, compoundLeafCallback);
+                        }
+                        else
+                        {
+                            // If there's only a single child shape then there's no need to search any more, we know
+                            // which child overlaps
+                            BroadphaseResult result = {co, 0};
+                            mResults.push_back(result);
+                        }
+                    }
+                    else
+                    {
+                        BroadphaseResult result = {co, -1};
+                        mResults.push_back(result);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
+    };
+
+    RecoverBroadPhaseCallback recoverBroadResult(mRigidBody, 1 /* collision layer */, 0xFFFF /* collision mask */,
+                                                 minAabb, maxAabb);
+    collisionWorld->getBroadphase()->aabbTest(minAabb, maxAabb, recoverBroadResult);
+
+    bool penetration = false;
+
+    /*    collisionWorld->getDispatcher()->dispatchAllCollisionPairs(
+            m_ghostObject->getOverlappingPairCache(), collisionWorld->getDispatchInfo(),
+       collisionWorld->getDispatcher());
+
+        m_currentPosition = m_ghostObject->getWorldTransform().getOrigin();
+
+        //	btScalar maxPen = btScalar(0.0);
+        for (int i = 0; i < m_ghostObject->getOverlappingPairCache()->getNumOverlappingPairs(); i++)
+        {
+            m_manifoldArray.resize(0);
+
+            btBroadphasePair* collisionPair = &m_ghostObject->getOverlappingPairCache()->getOverlappingPairArray()[i];
+
+            btCollisionObject* obj0 = static_cast<btCollisionObject*>(collisionPair->m_pProxy0->m_clientObject);
+            btCollisionObject* obj1 = static_cast<btCollisionObject*>(collisionPair->m_pProxy1->m_clientObject);
+
+            if ((obj0 && !obj0->hasContactResponse()) || (obj1 && !obj1->hasContactResponse()))
+                continue;
+
+            if (!needsCollision(obj0, obj1))
+                continue;
+
+            if (collisionPair->m_algorithm)
+                collisionPair->m_algorithm->getAllContactManifolds(m_manifoldArray);
+
+            for (int j = 0; j < m_manifoldArray.size(); j++)
+            {
+                btPersistentManifold* manifold = m_manifoldArray[j];
+                btScalar directionSign = manifold->getBody0() == m_ghostObject ? btScalar(-1.0) : btScalar(1.0);
+                for (int p = 0; p < manifold->getNumContacts(); p++)
+                {
+                    const btManifoldPoint& pt = manifold->getContactPoint(p);
+
+                    btScalar dist = pt.getDistance();
+
+                    if (dist < -m_maxPenetrationDepth)
+                    {
+                        // TODO: cause problems on slopes, not sure if it is needed
+                        // if (dist < maxPen)
+                        //{
+                        //	maxPen = dist;
+                        //	m_touchingNormal = pt.m_normalWorldOnB * directionSign;//??
+
+                        //}
+                        m_currentPosition += pt.m_normalWorldOnB * directionSign * dist * btScalar(0.2);
+                        penetration = true;
+                    }
+                    else
+                    {
+                        // printf("touching %f\n", dist);
+                    }
+                }
+
+                // manifold->clearManifold();
+            }
+        }
+        btTransform newTrans = m_ghostObject->getWorldTransform();
+        newTrans.setOrigin(m_currentPosition);
+        m_ghostObject->setWorldTransform(newTrans);
+        //	printf("m_touchingNormal = %f,%f,%f\n",m_touchingNormal[0],m_touchingNormal[1],m_touchingNormal[2]);
+    */
+    // Perform narrowphase per shape
+    // godot: for (int kinIndex = p_body->get_kinematic_utilities()->shapes.size() - 1; 0 <= kinIndex; --kinIndex)
+    for (int kinIndex = 0; kinIndex < (int)mCollisionShapes.size(); kinIndex++)
+    {
+        if (mCollisionShapes[kinIndex]->getShapeType() == EMPTY_SHAPE_PROXYTYPE)
+        {
+            continue;
+        }
+
+        btTransform shapeTransform = bodyPosition * mCollisionTransforms[kinIndex];
+        shapeTransform.getOrigin() += mDeltaRecoverMovement;
+
+        for (int i = recoverBroadResult.mResults.size() - 1; 0 <= i; --i)
+        {
+            btCollisionObject* otherObject = recoverBroadResult.mResults[i].mCollisionObject;
+
+            /*
+            CollisionObjectBullet* gObj = static_cast<CollisionObjectBullet*>(otherObject->getUserPointer());
+            if (p_exclude.has(gObj->get_self()))
+            {
+                continue;
+            }
+            */
+
+            if (mInfiniteInertia && !otherObject->isStaticOrKinematicObject())
+            {
+                otherObject->activate(); // Force activation of hitten rigid, soft body
+                continue;
+            }
+            else if (!mRigidBody->checkCollideWith(otherObject) || !otherObject->checkCollideWith(mRigidBody))
+            {
+                continue;
+            }
+
+            if (otherObject->getCollisionShape()->isCompound())
+            {
+                const btCompoundShape* cs = static_cast<const btCompoundShape*>(otherObject->getCollisionShape());
+                if (cs->getNumChildShapes() == 0)
+                {
+                    continue; // No shapes to depenetrate from.
+                }
+                int shapeIdx = recoverBroadResult.mResults[i].mCompoundChildIndex;
+                if (shapeIdx < 0 || shapeIdx > cs->getNumChildShapes())
+                    return false;
+
+                if (cs->getChildShape(shapeIdx)->isConvex())
+                {
+                    if (RFP_convex_convex_test(mCollisionShapes[kinIndex],
+                                               static_cast<const btConvexShape*>(cs->getChildShape(shapeIdx)),
+                                               otherObject, kinIndex, shapeIdx, shapeTransform,
+                                               otherObject->getWorldTransform() * cs->getChildTransform(shapeIdx),
+                                               mRecoverMovementScale, mDeltaRecoverMovement, rresult))
+                    {
+                        penetration = true;
+                    }
+                }
+                else
+                {
+                    if (RFP_convex_world_test(mCollisionShapes[kinIndex], cs->getChildShape(shapeIdx), mRigidBody,
+                                              otherObject, kinIndex, shapeIdx, shapeTransform,
+                                              otherObject->getWorldTransform() * cs->getChildTransform(shapeIdx),
+                                              mRecoverMovementScale, mDeltaRecoverMovement, rresult))
+                    {
+                        penetration = true;
+                    }
+                }
+            }
+            else if (otherObject->getCollisionShape()->isConvex())
+            { /// Execute GJK test against object shape
+                if (RFP_convex_convex_test(mCollisionShapes[kinIndex],
+                                           static_cast<const btConvexShape*>(otherObject->getCollisionShape()),
+                                           otherObject, kinIndex, 0, shapeTransform, otherObject->getWorldTransform(),
+                                           mRecoverMovementScale, mDeltaRecoverMovement, rresult))
+                {
+                    penetration = true;
+                }
+            }
+            else
+            {
+                if (RFP_convex_world_test(mCollisionShapes[kinIndex], otherObject->getCollisionShape(), mRigidBody,
+                                          otherObject, kinIndex, 0, shapeTransform, otherObject->getWorldTransform(),
+                                          mRecoverMovementScale, mDeltaRecoverMovement, rresult))
+                {
+                    penetration = true;
+                }
+            }
+        }
+    }
+
+    return penetration;
+}
+#endif
+bool KinematicMotionSimple::recoverFromPenetration(btCollisionWorld* collisionWorld)
+{
+    // Here we must refresh the overlapping paircache as the penetrating movement itself or the
+    // previous recovery iteration might have used setWorldTransform and pushed us into an object
+    // that is not in the previous cache contents from the last timestep, as will happen if we
+    // are pushed into a new AABB overlap. Unhandled this means the next convex sweep gets stuck.
+    //
+    // Do this by calling the broadphase's setAabb with the moved AABB, this will update the broadphase
+    // paircache and the ghostobject's internal paircache at the same time.    /BW
+
+    btVector3 minAabb, maxAabb;
+    bool shapes_found = false;
+    btTransform bodyPosition = mGhostObject->getWorldTransform();
+
+    for (int kinIndex = 0; kinIndex < (int)mCollisionShapes.size(); kinIndex++)
+    {
+
+        btTransform shapeTransform = bodyPosition * mCollisionTransforms[kinIndex];
+
+        btVector3 shapeAabbMin, shapeAabbMax;
+        mCollisionShapes[kinIndex]->getAabb(shapeTransform, shapeAabbMin, shapeAabbMax);
+
+        if (!shapes_found)
+        {
+            minAabb = shapeAabbMin;
+            maxAabb = shapeAabbMax;
+            shapes_found = true;
+        }
+        else
+        {
+            minAabb.setX((minAabb.x() < shapeAabbMin.x()) ? minAabb.x() : shapeAabbMin.x());
+            minAabb.setY((minAabb.y() < shapeAabbMin.y()) ? minAabb.y() : shapeAabbMin.y());
+            minAabb.setZ((minAabb.z() < shapeAabbMin.z()) ? minAabb.z() : shapeAabbMin.z());
+
+            maxAabb.setX((maxAabb.x() > shapeAabbMax.x()) ? maxAabb.x() : shapeAabbMax.x());
+            maxAabb.setY((maxAabb.y() > shapeAabbMax.y()) ? maxAabb.y() : shapeAabbMax.y());
+            maxAabb.setZ((maxAabb.z() > shapeAabbMax.z()) ? maxAabb.z() : shapeAabbMax.z());
+        }
+    }
+
+    // If there are no shapes then there is no penetration either
+    if (!shapes_found)
+    {
+        return false;
+    }
+    collisionWorld->getBroadphase()->setAabb(mGhostObject->getBroadphaseHandle(), minAabb, maxAabb,
+                                             collisionWorld->getDispatcher());
+
+    bool penetration = false;
+
+    collisionWorld->getDispatcher()->dispatchAllCollisionPairs(
+        mGhostObject->getOverlappingPairCache(), collisionWorld->getDispatchInfo(), collisionWorld->getDispatcher());
+
+    mCurrentPosition = mGhostObject->getWorldTransform().getOrigin();
+
+    //	btScalar maxPen = btScalar(0.0);
+    for (int i = 0; i < mGhostObject->getOverlappingPairCache()->getNumOverlappingPairs(); i++)
+    {
+        mManifoldArray.resize(0);
+
+        btBroadphasePair* collisionPair = &mGhostObject->getOverlappingPairCache()->getOverlappingPairArray()[i];
+
+        btCollisionObject* obj0 = static_cast<btCollisionObject*>(collisionPair->m_pProxy0->m_clientObject);
+        btCollisionObject* obj1 = static_cast<btCollisionObject*>(collisionPair->m_pProxy1->m_clientObject);
+
+        if ((obj0 && !obj0->hasContactResponse()) || (obj1 && !obj1->hasContactResponse()))
+            continue;
+
+        if (!needsCollision(obj0, obj1))
+            continue;
+
+        if (collisionPair->m_algorithm)
+            collisionPair->m_algorithm->getAllContactManifolds(mManifoldArray);
+
+        for (int j = 0; j < mManifoldArray.size(); j++)
+        {
+            btPersistentManifold* manifold = mManifoldArray[j];
+            btScalar directionSign = manifold->getBody0() == mGhostObject ? btScalar(-1.0) : btScalar(1.0);
+            for (int p = 0; p < manifold->getNumContacts(); p++)
+            {
+                const btManifoldPoint& pt = manifold->getContactPoint(p);
+
+                btScalar dist = pt.getDistance();
+
+                if (dist < -mMaxPenetrationDepth)
+                {
+                    // TODO: cause problems on slopes, not sure if it is needed
+                    // if (dist < maxPen)
+                    //{
+                    //	maxPen = dist;
+                    //	m_touchingNormal = pt.m_normalWorldOnB * directionSign;//??
+
+                    //}
+                    mCurrentPosition += pt.m_normalWorldOnB * directionSign * dist * btScalar(0.2);
+                    penetration = true;
+                }
+                else
+                {
+                    // printf("touching %f\n", dist);
+                }
+            }
+
+            // manifold->clearManifold();
+        }
+    }
+    btTransform newTrans = mGhostObject->getWorldTransform();
+    newTrans.setOrigin(mCurrentPosition);
+    mGhostObject->setWorldTransform(newTrans);
+    //	printf("m_touchingNormal = %f,%f,%f\n",m_touchingNormal[0],m_touchingNormal[1],m_touchingNormal[2]);
+    return penetration;
+}
+bool KinematicMotionSimple::needsCollision(const btCollisionObject* body0, const btCollisionObject* body1)
+{
+    bool collides = (body0->getBroadphaseHandle()->m_collisionFilterGroup &
+                     body1->getBroadphaseHandle()->m_collisionFilterMask) != 0;
+    collides = collides && (body1->getBroadphaseHandle()->m_collisionFilterGroup &
+                            body0->getBroadphaseHandle()->m_collisionFilterMask);
+    return collides;
+}
+void KinematicMotionSimple::preStep(btCollisionWorld* collisionWorld)
+{
+    mCurrentPosition = mGhostObject->getWorldTransform().getOrigin();
+    //	m_targetPosition = m_currentPosition;
+
+    mCurrentOrientation = mGhostObject->getWorldTransform().getRotation();
+    //	m_targetOrientation = m_currentOrientation;
+    //	printf("m_targetPosition=%f,%f,%f\n",m_targetPosition[0],m_targetPosition[1],m_targetPosition[2]);
+}
+void KinematicMotionSimple::playerStep(btCollisionWorld* collisionWorld, btScalar dt)
+{
+
+    int numPenetrationLoops = 0;
+    //	m_touchingContact = false;
+    while (recoverFromPenetration(collisionWorld))
+    {
+        numPenetrationLoops++;
+        //		m_touchingContact = true;
+        if (numPenetrationLoops > 4)
+        {
+            // printf("character could not recover from penetration = %d\n", numPenetrationLoops);
+            break;
+        }
+    }
+}
+
+void KinematicMotionSimple::updateAction(btCollisionWorld* collisionWorld, btScalar deltaTimeStep)
+{
+    preStep(collisionWorld);
+    playerStep(collisionWorld, deltaTimeStep);
+}
+void KinematicMotionSimple::debugDraw(btIDebugDraw* debugDrawer) {}
+void KinematicMotionSimple::setupCollisionShapes(btCollisionObject* body)
+{
+    std::list<std::pair<btCompoundShape*, btTransform>> shape_list;
+    btCollisionShape* root_shape = body->getCollisionShape();
+    btTransform root_xform;
+    root_xform.setIdentity();
+    if (root_shape->isCompound())
+    {
+        btCompoundShape* cshape = static_cast<btCompoundShape*>(root_shape);
+        shape_list.push_back({cshape, root_xform});
+    }
+    else
+    {
+        mCollisionShapes.push_back(root_shape);
+        mCollisionTransforms.push_back(root_xform);
+    }
+    while (!shape_list.empty())
+    {
+        int i;
+        std::pair<btCompoundShape*, btTransform> s = shape_list.front();
+        shape_list.pop_front();
+        for (i = 0; i < s.first->getNumChildShapes(); i++)
+        {
+            btCollisionShape* shape = s.first->getChildShape(i);
+            btTransform xform = s.second * s.first->getChildTransform(i);
+            if (shape->isConvex())
+            {
+                mCollisionShapes.push_back(shape);
+                mCollisionTransforms.push_back(xform);
+            }
+            else if (shape->isCompound())
+            {
+                btCompoundShape* cshape = static_cast<btCompoundShape*>(shape);
+                shape_list.push_back({cshape, xform});
+            }
+        }
+    }
+}
+KinematicMotionSimple::KinematicMotionSimple(btPairCachingGhostObject* ghostObject)
+    : btActionInterface(), mGhostObject(ghostObject)
+{
+    setupCollisionShapes(ghostObject);
+}
+
 } // namespace Bullet
 } // namespace Ogre
